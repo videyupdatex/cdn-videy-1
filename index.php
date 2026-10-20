@@ -477,6 +477,11 @@ function fmt_datetime(string $iso): string {
     $t = strtotime($iso);
     return $t ? date('d M Y, H:i', $t) . ' WIB' : '-';
 }
+/** URL bersih milik situs ini: https://domain-anda/ID.mp4 */
+function clean_url(string $id): string {
+    $host = (string)($_SERVER['HTTP_HOST'] ?? 'localhost');
+    return (is_https() ? 'https' : 'http') . '://' . $host . '/' . rawurlencode($id) . '.mp4';
+}
 /** Nama situs sumber: videy.co / aceimg.com (dari link yang ditempel, atau dari direct URL). */
 function source_site(array $v): string {
     foreach ([(string)($v['source'] ?? ''), (string)($v['direct'] ?? '')] as $u) {
@@ -711,8 +716,8 @@ page_start($title . ' · ' . SITE_NAME, true);
             </dd></div>
             <div><dt>Sumber asli</dt><dd><?= e(source_site($v)) ?></dd></div>
             <div><dt>Link file video</dt><dd>
-              <a href="<?= e((string)$v['direct']) ?>" target="_blank" rel="noopener noreferrer"><?= e((string)$v['direct']) ?></a><br>
-              <button type="button" class="ghost" data-copy="<?= e((string)$v['direct']) ?>">Salin</button>
+              <a href="<?= e(clean_url($id)) ?>" target="_blank" rel="noopener noreferrer"><?= e(clean_url($id)) ?></a><br>
+              <button type="button" class="ghost" data-copy="<?= e(clean_url($id)) ?>">Salin</button>
             </dd></div>
           </dl>
         </details>
