@@ -10,6 +10,7 @@
  *   DATA_DIR   = /data   (lokasi Volume agar videos.json permanen)
  */
 declare(strict_types=1);
+date_default_timezone_set('Asia/Jakarta'); // tanggal ditampilkan dalam WIB
 
 /* ================= KONFIGURASI ================= */
 define('ADMIN_PASS', getenv('ADMIN_PASS') ?: 'ganti-password-ini');
@@ -425,6 +426,17 @@ details.panel[open]>summary:after{content:"\2013"}
 .meta{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding-top:10px}
 .meta .t{font-weight:600;font-size:14px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
 .meta .d{color:var(--mute);font-size:12px;margin-top:2px}
+.dt{margin-top:8px;border:1px solid var(--line);border-radius:8px}
+.dt>summary{cursor:pointer;padding:7px 10px;font-size:13px;color:var(--mute);list-style:none}
+.dt>summary::-webkit-details-marker{display:none}
+.dt>summary:after{content:"+";float:right}
+.dt[open]>summary:after{content:"\2013"}
+.dt[open]>summary{color:var(--fg)}
+.dt dl{margin:0;padding:2px 10px 10px;display:grid;gap:9px;font-size:13px}
+.dt dt{color:var(--mute);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.dt dd{margin:0;overflow-wrap:anywhere}
+.dt dd a{text-decoration:underline}
+.dt button.ghost{padding:2px 8px;font-size:12px;margin-top:4px}
 .move{margin-top:8px}
 .move select{padding:6px 8px;font-size:13px}
 .empty{border:1px dashed var(--line);border-radius:12px;padding:48px 20px;text-align:center;color:var(--mute);margin-top:24px}
@@ -460,6 +472,19 @@ function page_end(): void { ?>
 function fmt_date(string $iso): string {
     $t = strtotime($iso);
     return $t ? date('d M Y', $t) : '';
+}
+function fmt_datetime(string $iso): string {
+    $t = strtotime($iso);
+    return $t ? date('d M Y, H:i', $t) . ' WIB' : '-';
+}
+/** Nama situs sumber: videy.co / aceimg.com (dari link yang ditempel, atau dari direct URL). */
+function source_site(array $v): string {
+    foreach ([(string)($v['source'] ?? ''), (string)($v['direct'] ?? '')] as $u) {
+        $h = strtolower((string)parse_url($u, PHP_URL_HOST));
+        if ($h === '') continue;
+        foreach (SOURCE_HOSTS as $d) if (host_allowed($h, [$d])) return $d;
+    }
+    return '-';
 }
 
 /* ---------- URL bersih: /ID.mp4 ---------- */
@@ -675,6 +700,22 @@ page_start($title . ' · ' . SITE_NAME, true);
             <button class="ghost">Hapus</button>
           </form>
         </div>
+        <details class="dt">
+          <summary>Detail</summary>
+          <dl>
+            <div><dt>Judul</dt><dd><?= e((string)$v['title']) ?></dd></div>
+            <div><dt>Tanggal upload</dt><dd><?= e(fmt_datetime((string)($v['created'] ?? ''))) ?></dd></div>
+            <div><dt>Link asli</dt><dd>
+              <a href="<?= e((string)$v['source']) ?>" target="_blank" rel="noopener noreferrer"><?= e((string)$v['source']) ?></a><br>
+              <button type="button" class="ghost" data-copy="<?= e((string)$v['source']) ?>">Salin</button>
+            </dd></div>
+            <div><dt>Sumber asli</dt><dd><?= e(source_site($v)) ?></dd></div>
+            <div><dt>Link file video</dt><dd>
+              <a href="<?= e((string)$v['direct']) ?>" target="_blank" rel="noopener noreferrer"><?= e((string)$v['direct']) ?></a><br>
+              <button type="button" class="ghost" data-copy="<?= e((string)$v['direct']) ?>">Salin</button>
+            </dd></div>
+          </dl>
+        </details>
         <form class="move" method="post">
           <input type="hidden" name="action" value="move">
           <input type="hidden" name="csrf" value="<?= e(csrf()) ?>">
@@ -699,6 +740,15 @@ page_start($title . ' · ' . SITE_NAME, true);
         if(ok&&el.classList.contains('vitem'))c++;
       });
       n.textContent=c;
+    });
+    document.addEventListener('click',function(ev){
+      var b=ev.target.closest&&ev.target.closest('[data-copy]');
+      if(!b)return;
+      var t=b.getAttribute('data-copy'),old=b.textContent;
+      function done(){b.textContent='Tersalin';setTimeout(function(){b.textContent=old;},1200);}
+      if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(done);}
+      else{var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();
+        try{document.execCommand('copy');done();}catch(e){}document.body.removeChild(a);}
     });
   })();
   </script>
