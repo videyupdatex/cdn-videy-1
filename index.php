@@ -20,7 +20,11 @@ const MAX_DEPTH    = 8;                            // kedalaman maksimum subfold
 const SITE_NAME    = 'Videos';
 const SOURCE_HOSTS = ['videy.co', 'aceimg.com'];   // domain halaman sumber
 const MEDIA_HOSTS  = ['videy.co', 'aceimg.com'];   // domain file video (CDN); tambah jika perlu
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36';
+// true  = orang yang BELUM login yang membuka /ID.mp4 langsung diarahkan (302) ke file video di CDN
+//         (perilaku seperti cdn.videy.co/ID.mp4, bisa dibagikan / di-embed).
+// false = /ID.mp4 hanya bisa dibuka setelah login (tanpa login -> form masuk).
+const PUBLIC_MP4   = true;
+const UA ='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36';
 /* ================================================ */
 
 function e(string $s): string { return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -204,7 +208,7 @@ function fid(array $db, string $f): string {
     return ($f !== '' && isset($db['folders'][$f])) ? $f : '';
 }
 function folder_url(array $db, string $f): string {
-    return fid($db, $f) !== '' ? '?f=' . rawurlencode($f) : './';
+    return fid($db, $f) !== '' ? './?f=' . rawurlencode($f) : './';
 }
 /** Jalur dari root ke folder: [[id, nama], ...] */
 function folder_path(array $folders, string $f): array {
@@ -458,6 +462,25 @@ function fmt_date(string $iso): string {
     return $t ? date('d M Y', $t) : '';
 }
 
+/* ---------- URL bersih: /ID.mp4 ---------- */
+$reqPath = (string)parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+$cleanId = preg_match('~^/([A-Za-z0-9]{6,32})\.mp4$~', $reqPath, $mm) ? $mm[1] : null;
+
+if ($cleanId !== null && !$admin) {
+    $pv = load_db()['videos'][$cleanId] ?? null;
+    if (!$pv) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit('Not found');
+    }
+    if (PUBLIC_MP4) {
+        header('Referrer-Policy: no-referrer');
+        header('Cache-Control: no-store');
+        go((string)$pv['direct']);
+    }
+    // PUBLIC_MP4 = false -> lanjut ke form masuk di bawah
+}
+
 /* ---------- Belum login: hanya tampil form masuk ---------- */
 if (!$admin) {
     http_response_code(200);
@@ -478,15 +501,19 @@ if (!$admin) {
 $db = load_db();
 
 /* ---------- Halaman pemutar ---------- */
-if (isset($_GET['v'])) {
-    $vid = $db['videos'][(string)$_GET['v']] ?? null;
+$vidKey = $cleanId ?? (isset($_GET['v']) ? (string)$_GET['v'] : null);
+if ($vidKey !== null) {
+    $vid = $db['videos'][$vidKey] ?? null;
+    // link lama ?v=ID -> arahkan ke URL bersih /ID.mp4
+    if ($vid && $cleanId === null) go('/' . rawurlencode($vidKey) . '.mp4');
+    if (!$vid) http_response_code(404);
     page_start(($vid['title'] ?? 'Tidak ditemukan') . ' · ' . SITE_NAME, true);
     if ($vid):
         $vf   = fid($db, (string)($vid['folder'] ?? ''));
         $path = folder_path($db['folders'], $vf); ?>
       <div class="crumbs">
         <a href="./">Beranda</a>
-        <?php foreach ($path as [$pid, $pname]): ?> / <a href="?f=<?= e(rawurlencode($pid)) ?>"><?= e($pname) ?></a><?php endforeach; ?>
+        <?php foreach ($path as [$pid, $pname]): ?> / <a href="./?f=<?= e(rawurlencode($pid)) ?>"><?= e($pname) ?></a><?php endforeach; ?>
       </div>
       <div class="player">
         <video controls playsinline preload="metadata" referrerpolicy="no-referrer" autoplay>
@@ -539,7 +566,7 @@ page_start($title . ' · ' . SITE_NAME, true);
   <?php if ($path): ?>
     <a href="./">Beranda</a>
     <?php foreach ($path as $i => [$pid, $pname]): ?>
-      / <?= $i === count($path) - 1 ? '<b>' . e($pname) . '</b>' : '<a href="?f=' . e(rawurlencode($pid)) . '">' . e($pname) . '</a>' ?>
+      / <?= $i === count($path) - 1 ? '<b>' . e($pname) . '</b>' : '<a href="./?f=' . e(rawurlencode($pid)) . '">' . e($pname) . '</a>' ?>
     <?php endforeach; ?>
   <?php else: ?>
     <b>Beranda</b>
@@ -614,7 +641,7 @@ page_start($title . ' · ' . SITE_NAME, true);
     <div class="fgrid">
     <?php foreach ($subs as $id => $f): ?>
       <div class="fcard item" data-t="<?= e(mb_strtolower((string)$f['name'])) ?>">
-        <a href="?f=<?= e(rawurlencode($id)) ?>">
+        <a href="./?f=<?= e(rawurlencode($id)) ?>">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2H19.5A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>
           <div>
             <div class="fname"><?= e((string)$f['name']) ?></div>
@@ -631,13 +658,13 @@ page_start($title . ' · ' . SITE_NAME, true);
     <div class="grid">
     <?php foreach ($vids as $id => $v): ?>
       <article class="card item vitem" data-t="<?= e(mb_strtolower((string)$v['title'])) ?>">
-        <a class="thumb" href="?v=<?= e(rawurlencode($id)) ?>">
+        <a class="thumb" href="./<?= e(rawurlencode($id)) ?>.mp4">
           <video muted playsinline preload="metadata" referrerpolicy="no-referrer" src="<?= e($v['direct']) ?>#t=0.5"></video>
           <span class="play"><i></i></span>
         </a>
         <div class="meta">
           <div>
-            <a class="t" href="?v=<?= e(rawurlencode($id)) ?>"><?= e((string)$v['title']) ?></a>
+            <a class="t" href="./<?= e(rawurlencode($id)) ?>.mp4"><?= e((string)$v['title']) ?></a>
             <div class="d"><?= e(fmt_date($v['created'] ?? '')) ?></div>
           </div>
           <form method="post" onsubmit="return confirm('Hapus video ini dari daftar?')" style="margin:0">
