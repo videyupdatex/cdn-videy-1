@@ -415,15 +415,16 @@ details.panel[open]>summary:after{content:"\2013"}
 .fcard svg{flex:none}
 .fname{font-weight:600;font-size:14px;overflow-wrap:anywhere}
 .fcount{color:var(--mute);font-size:12px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:20px}
-.card{display:flex;flex-direction:column}
-.thumb{position:relative;display:block;aspect-ratio:16/9;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,400px),1fr));gap:20px}
+.card{display:flex;flex-direction:row;align-items:flex-start;gap:14px}
+.cbody{flex:1;min-width:0}
+.thumb{position:relative;display:block;flex:none;width:210px;aspect-ratio:16/9;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .thumb video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
 .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s;background:rgba(0,0,0,.35)}
 .play i{width:44px;height:44px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center}
 .play i:after{content:"";margin-left:3px;border-left:12px solid #000;border-top:8px solid transparent;border-bottom:8px solid transparent}
 .thumb:hover .play{opacity:1}
-.meta{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding-top:10px}
+.meta{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding-top:0}
 .meta .t{font-weight:600;font-size:14px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
 .meta .d{color:var(--mute);font-size:12px;margin-top:2px}
 .dt{margin-top:8px;border:1px solid var(--line);border-radius:8px}
@@ -439,6 +440,7 @@ details.panel[open]>summary:after{content:"\2013"}
 .dt button.ghost{padding:2px 8px;font-size:12px;margin-top:4px}
 .move{margin-top:8px}
 .move select{padding:6px 8px;font-size:13px}
+@media(max-width:520px){.thumb{width:128px}.card{gap:10px}.meta .t{font-size:13px}}
 .empty{border:1px dashed var(--line);border-radius:12px;padding:48px 20px;text-align:center;color:var(--mute);margin-top:24px}
 .player video{width:100%;max-height:78vh;background:#000;border-radius:12px;display:block}
 .pmeta{margin-top:16px}
@@ -692,6 +694,7 @@ page_start($title . ' · ' . SITE_NAME, true);
           <video muted playsinline preload="metadata" referrerpolicy="no-referrer" src="<?= e($v['direct']) ?>#t=0.5"></video>
           <span class="play"><i></i></span>
         </a>
+        <div class="cbody">
         <div class="meta">
           <div>
             <a class="t" href="./<?= e(rawurlencode($id)) ?>.mp4"><?= e((string)$v['title']) ?></a>
@@ -728,6 +731,7 @@ page_start($title . ' · ' . SITE_NAME, true);
           <input type="hidden" name="id" value="<?= e($id) ?>">
           <?php folder_select($db, 'folder', (string)($v['folder'] ?? ''), 'Pindah ke: Beranda', true); ?>
         </form>
+        </div>
       </article>
     <?php endforeach; ?>
     </div>
