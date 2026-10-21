@@ -149,15 +149,49 @@ function resolve_video(string $link): array {
         }
     }
 
+    $fallback = null;
+    // 2b) Pola aceimg: aceimg.com/upload/?f=NAMA.mp4
+    $fname = (string)($q['f'] ?? $q['file'] ?? '');
+    $hasFile = $fname !== '' && preg_match('/^[A-Za-z0-9._-]{3,128}$/', $fname)
+        && preg_match('/\.(mp4|webm|m3u8|mov|m4v)$/i', $fname);
+    if ($hasFile && host_allowed($host, ['aceimg.com'])) {
+        $cands = [$link]; // kadang URL itu sendiri sudah menyajikan file video
+        $n = rawurlencode($fname);
+        foreach (['aceimg.com/upload/', 'aceimg.com/uploads/', 'aceimg.com/files/', 'aceimg.com/f/',
+                  'aceimg.com/i/', 'aceimg.com/d/', 'cdn.aceimg.com/', 'cdn.aceimg.com/upload/',
+                  'cdn.aceimg.com/uploads/', 'i.aceimg.com/', 'f.aceimg.com/'] as $b) {
+            $cands[] = 'https://' . $b . $n;
+        }
+        $cands[] = 'https://aceimg.com/upload/?f=' . $n . '&raw=1';
+        $cands[] = 'https://aceimg.com/upload/?f=' . $n . '&download=1';
+        $cands[] = 'https://aceimg.com/download/?f=' . $n;
+        foreach ($cands as $c) {
+            if (verify_video($c)) {
+                return ['ok' => true, 'direct' => $c, 'title' => $fname];
+            }
+        }
+        // tidak ada file langsung yang bisa diverifikasi -> redirect ke link aceimg itu sendiri
+        $fallback = ['ok' => true, 'direct' => $link, 'title' => $fname, 'unverified' => true];
+    }
+
     // 3) Scraping umum
     $page = http_get($link);
     if ($page['code'] !== 200 || $page['body'] === '') {
+        if ($fallback) return $fallback;
         return ['ok' => false, 'error' => 'Halaman sumber tidak bisa dibuka (HTTP ' . $page['code'] . ').'];
     }
     $html = $page['body'];
     $base = $page['url'] ?: $link;
 
     $patterns = [
+        // atribut lain yang sering memuat file: data-src, data-url, href download/raw, meta refresh
+        '~\bdata-(?:src|url|video|file)=["\']([^"\']+)~i',
+        '~<a[^>]+href=["\']([^"\']+\.(?:mp4|webm|m3u8|mov|m4v)[^"\']*)["\']~i',
+        '~<a[^>]+href=["\']([^"\']*(?:download|raw|file)[^"\']*)["\']~i',
+        '~<meta[^>]+http-equiv=["\']refresh["\'][^>]+url=([^"\'>\s]+)~i',
+        // string apa pun (termasuk path relatif di JS) yang memuat nama file dari ?f=
+        $hasFile ? '~["\'(]([^"\'\s<>()]*' . preg_quote($fname, '~') . '[^"\'\s<>()]*)["\')]~i'
+                 : '~(?!x)x~',
         '~<meta[^>]+property=["\']og:video(?::secure_url|:url)?["\'][^>]+content=["\']([^"\']+)~i',
         '~<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:video~i',
         '~<source[^>]+src=["\']([^"\']+)~i',
@@ -170,7 +204,7 @@ function resolve_video(string $link): array {
             foreach ($m[1] as $u) $found[] = absolute_url($u, $base);
         }
     }
-    $found = array_values(array_unique($found));
+    $found = array_slice(array_values(array_unique($found)), 0, 15); // batasi agar tidak lama
 
     $title = 'Video';
     if (preg_match('~<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)~i', $html, $t)
@@ -182,12 +216,18 @@ function resolve_video(string $link): array {
             return ['ok' => true, 'direct' => $cand, 'title' => mb_substr($title, 0, 120)];
         }
     }
-    return ['ok' => false, 'error' => 'Tidak menemukan URL video di halaman tersebut. '
+    // simpan jejak untuk diagnosis: buka /?debug=1 setelah login
+    @file_put_contents(dirname(DATA_FILE) . '/last_fail.txt',
+        "LINK: $link\nEFEKTIF: $base\nHTTP: {$page['code']}  TYPE: {$page['type']}\n"
+        . "KANDIDAT:\n" . implode("\n", $found) . "\n\n===== HTML =====\n" . mb_substr($html, 0, 30000));
+    if ($fallback) return $fallback;
+    return ['ok' => false, 'error' => 'Tidak menemukan URL video di halaman tersebut (' . count($found)
+        . ' kandidat dicoba). Jika Anda tahu link langsung file-nya (berakhiran .mp4), tempel link itu saja. '
         . 'Jika CDN memakai domain lain, tambahkan ke MEDIA_HOSTS.'];
 }
 
 /* ---------------- Penyimpanan (JSON) ----------------
- * Format: {"folders": {id: {name, parent}}, "videos": {id: {title, source, direct, created, folder}}}
+ * Format: {"folders": {id: {name, parent}}, "videos": {id: {title, source, direct, created, folder, verified}}}
  * Format lama (daftar video saja) otomatis dimigrasikan saat dibaca.
  */
 function load_db(): array {
@@ -276,6 +316,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'direct'  => $res['direct'],
                 'created' => date('c'),
                 'folder'  => $folder,
+                'verified' => empty($res['unverified']),
             ];
             save_db($db);
             flash('Ditambahkan: ' . $db['videos'][$id]['title']);
@@ -532,7 +573,19 @@ if (!$admin) {
 
 $db = load_db();
 
+/* ---------- Diagnosis: hasil gagal terakhir (hanya admin) ---------- */
+if (isset($_GET['debug'])) {
+    header('Content-Type: text/plain; charset=utf-8');
+    $f = dirname(DATA_FILE) . '/last_fail.txt';
+    exit(is_file($f) ? (string)file_get_contents($f) : 'Belum ada kegagalan tercatat.');
+}
+
 /* ---------- Halaman pemutar ---------- */
+// video yang tidak terverifikasi (mis. aceimg ?f=) -> langsung redirect ke link aslinya
+if ($cleanId !== null && (($db['videos'][$cleanId]['verified'] ?? true) === false)) {
+    header('Referrer-Policy: no-referrer');
+    go((string)$db['videos'][$cleanId]['direct']);
+}
 $vidKey = $cleanId ?? (isset($_GET['v']) ? (string)$_GET['v'] : null);
 if ($vidKey !== null) {
     $vid = $db['videos'][$vidKey] ?? null;
@@ -691,7 +744,11 @@ page_start($title . ' · ' . SITE_NAME, true);
     <?php foreach ($vids as $id => $v): ?>
       <article class="card item vitem" data-t="<?= e(mb_strtolower((string)$v['title'])) ?>">
         <a class="thumb" href="./<?= e(rawurlencode($id)) ?>.mp4">
+          <?php if (($v['verified'] ?? true) === false): ?>
+          <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px">Buka link ↗</span>
+          <?php else: ?>
           <video muted playsinline preload="metadata" referrerpolicy="no-referrer" src="<?= e($v['direct']) ?>#t=0.5"></video>
+          <?php endif; ?>
           <span class="play"><i></i></span>
         </a>
         <div class="cbody">
